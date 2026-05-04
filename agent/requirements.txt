@@ -1,0 +1,6 @@
+anthropic
+python-dotenv
+requests
+rich
+flask
+google-search-results
