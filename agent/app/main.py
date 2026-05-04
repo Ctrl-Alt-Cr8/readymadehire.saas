@@ -17,7 +17,7 @@ from app.scoring.filters import disqualify_jobs, passes_filters, qualifies_for_a
 from app.scoring.scorer import score_job, score_jobs_batch
 from app.sources.fetcher_router import fetch_all_jobs
 from app.sources.mock_jobs import get_jobs as get_mock_jobs
-from app.storage.job_store import DB_PATH, TEST_DB_PATH, init_db, is_known_job, record_job, update_last_seen
+from app.storage.job_store import init_db, is_known_job, record_job, update_last_seen
 from app.utils.send_email import send_email
 
 
@@ -49,15 +49,16 @@ def safe_ascii(text: str) -> str:
     )
 
 
-def run(mock: bool = False, dry_run: bool = False) -> None:
+def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
     """Fetch jobs, score fit, and generate tailored cover letters."""
-    db_path = TEST_DB_PATH if mock else DB_PATH
+    if not user_id:
+        user_id = os.getenv("USER_ID", "default")
 
     output_dir = "outputs"
     cover_letters_dir = os.path.join(output_dir, "cover_letters")
     os.makedirs(cover_letters_dir, exist_ok=True)
 
-    init_db(db_path)
+    init_db()
 
     if mock:
         jobs = get_mock_jobs()
@@ -75,9 +76,9 @@ def run(mock: bool = False, dry_run: bool = False) -> None:
     new_jobs = []
     skipped_known = 0
     for job in jobs:
-        if is_known_job(job.get("title", ""), job.get("company", ""), db_path=db_path):
+        if is_known_job(job.get("title", ""), job.get("company", ""), user_id=user_id):
             if not dry_run:
-                update_last_seen(job.get("title", ""), job.get("company", ""), db_path=db_path)
+                update_last_seen(job.get("title", ""), job.get("company", ""), user_id=user_id)
             skipped_known += 1
         else:
             new_jobs.append(job)
@@ -188,7 +189,7 @@ def run(mock: bool = False, dry_run: bool = False) -> None:
 
         if decision not in ["APPLY", "REVIEW"]:
             if not dry_run:
-                record_job(job, decision, score.get("score", 0), email_sent=False, db_path=db_path)
+                record_job(job, decision, score.get("score", 0), email_sent=False, user_id=user_id)
             continue
 
         # Only generate cover letter for APPLY
@@ -305,9 +306,9 @@ def run(mock: bool = False, dry_run: bool = False) -> None:
 
     if not dry_run:
         for entry in apply_jobs:
-            record_job(entry["_job"], "APPLY", entry["score"], email_sent=report_sent, db_path=db_path)
+            record_job(entry["_job"], "APPLY", entry["score"], email_sent=report_sent, user_id=user_id)
         for entry in review_jobs:
-            record_job(entry["_job"], "REVIEW", entry["score"], email_sent=report_sent, db_path=db_path)
+            record_job(entry["_job"], "REVIEW", entry["score"], email_sent=report_sent, user_id=user_id)
 
     results = sorted(results, key=lambda x: x["score"], reverse=True)
     top_results = results[:20]
@@ -327,9 +328,9 @@ def run(mock: bool = False, dry_run: bool = False) -> None:
     console.print(summary)
 
 
-def run_pipeline():
+def run_pipeline(user_id: str = "default"):
     """Wrapper so Cloud Run server can trigger the pipeline."""
-    run()
+    run(user_id=user_id)
 
 
 if __name__ == "__main__":

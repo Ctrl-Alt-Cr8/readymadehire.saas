@@ -4,3 +4,4 @@ requests
 rich
 flask
 google-search-results
+psycopg2-binary
