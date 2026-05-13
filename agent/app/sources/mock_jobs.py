@@ -1,59 +1,40 @@
-"""Mock job source for local development and pipeline testing."""
+"""Mock job source for local pipeline testing.
+Jobs are intentionally neutral — they test pipeline mechanics (APPLY/REVIEW/SKIP paths),
+not any specific profession. Real job relevance is determined by Claude against each
+user's uploaded profile.
+"""
 
 
 def get_jobs() -> list[dict]:
-    """Return realistic AI-related job listings as mock data."""
     return [
         {
-            "company": "Neural Forge Labs",
-            "title": "AI Agent Engineer",
-            "location": "Remote (US)",
-            "salary": "$120,000 - $150,000",
-            "description": (
-                "Build and ship autonomous AI workflows for go-to-market and operations teams. "
-                "Own prompt strategy, eval pipelines, and agent reliability in production."
-            ),
-            "url": "https://neuralforgelabs.com/jobs/ai-agent-engineer",
+            "company": "Mock Company A",
+            "title": "Mock Role A",
+            "location": "Remote",
+            "salary": "$80,000 - $100,000",
+            "description": "Mock job listing for pipeline testing. High fit score.",
+            "url": "https://example.com/job-a",
             "source": "mock",
             "mock_score": 92,
         },
         {
-            "company": "SignalCraft",
-            "title": "Prompt Engineer, Applied AI",
-            "location": "Hybrid (New York, NY)",
-            "salary": "$105,000 - $135,000",
-            "description": (
-                "Design prompt architectures and retrieval pipelines for customer-facing AI tools. "
-                "Partner with product and design to improve accuracy and tone."
-            ),
-            "url": "https://signalcraft.io/careers/prompt-engineer-applied-ai",
+            "company": "Mock Company B",
+            "title": "Mock Role B",
+            "location": "Remote",
+            "salary": "$70,000 - $90,000",
+            "description": "Mock job listing for pipeline testing. Medium fit score.",
+            "url": "https://example.com/job-b",
             "source": "mock",
-            "mock_score": 85,
+            "mock_score": 76,
         },
         {
-            "company": "Orbit Automations",
-            "title": "Automation Engineer (LLM Systems)",
-            "location": "Remote (Global)",
-            "salary": "$95,000 - $125,000",
-            "description": (
-                "Create automation flows that combine APIs, workflow engines, and LLM reasoning. "
-                "Focus on measurable business outcomes and resilient deployment practices."
-            ),
-            "url": "https://orbitautomations.com/jobs/automation-engineer-llm",
+            "company": "Mock Company C",
+            "title": "Mock Role C",
+            "location": "Remote",
+            "salary": "$60,000 - $75,000",
+            "description": "Mock job listing for pipeline testing. Low fit score.",
+            "url": "https://example.com/job-c",
             "source": "mock",
-            "mock_score": 78,
-        },
-        {
-            "company": "Canvas Intelligence",
-            "title": "Creative Technologist, AI Experiences",
-            "location": "Hybrid (Los Angeles, CA)",
-            "salary": "$110,000 - $140,000",
-            "description": (
-                "Prototype and productionize AI-driven creative experiences. "
-                "Blend design sensibility with engineering execution across generative systems."
-            ),
-            "url": "https://canvasintelligence.com/careers/creative-technologist-ai",
-            "source": "mock",
-            "mock_score": 72,
+            "mock_score": 55,
         },
     ]

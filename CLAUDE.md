@@ -12,7 +12,7 @@ The engine code (in `agent/`) is carried over from the original solo agent repo 
 
 ```
 agent/    # Python pipeline — Flask server, Claude API, job scoring, cover letters
-web/      # Next.js frontend — Firebase Auth, onboarding, dashboard (to be built)
+web/      # Next.js frontend — Firebase Auth, onboarding, dashboard
 ```
 
 ## Stack
@@ -21,7 +21,7 @@ web/      # Next.js frontend — Firebase Auth, onboarding, dashboard (to be bui
 - **AI**: Claude Haiku (scoring) + Claude Sonnet (cover letters) via Anthropic API
 - **DB**: Cloud SQL (Postgres) — connection via `DATABASE_URL` env var
 - **Auth**: Firebase Auth (ID token verified on agent, Firebase SDK on web)
-- **Web**: Next.js, TypeScript, Tailwind CSS
+- **Web**: Next.js 16, TypeScript, Tailwind CSS
 - **CI/CD**: Cloud Build → Cloud Run (agent), Vercel (web)
 - **Job sources**: SerpAPI (primary) → Serper.dev (per-keyword fallback)
 
@@ -32,75 +32,96 @@ web/      # Next.js frontend — Firebase Auth, onboarding, dashboard (to be bui
 - [x] SQLite swapped for Postgres (`psycopg2` + connection pool via `DATABASE_URL`)
 - [x] `user_id` threaded through entire pipeline — all DB records are user-scoped from day one
 - [x] `run_pipeline(user_id)` and `run()` accept user_id; server.py passes it to background thread
+- [x] **Task 2** — Per-user config: `users` + `user_configs` tables live in Postgres. `UserConfig` dataclass + `get_user_config(user_id)` in `job_store.py`. Config (profile + keywords) loaded at pipeline start and threaded through scorer, cover letter, and fetcher. Falls back to `config.py` for local CLI testing when no `DATABASE_URL`. Ibrahim's config seeded as the `default` user.
+- [x] **Task 3** — Firebase Auth on `/run-agent`: `firebase-admin` installed, `_verify_token()` verifies Bearer token, real Firebase UID used as `user_id`. Returns 401 on missing/invalid/expired token.
+- [x] **Task 4** — Per-run cost logging: thread-local token accumulator in `claude_client.py` tracks Haiku + Sonnet input/output tokens per run. `run_logs` table live in Postgres. `record_run_log()` writes cost after every non-dry-run. Pricing: Haiku $0.80/$4.00 per MTok in/out, Sonnet $3.00/$15.00.
+- [x] **Task 5** — Next.js scaffold in `web/`: TypeScript + Tailwind, Firebase Auth wired up with `AuthProvider` context, Google sign-in only, login page (`/`) redirects to dashboard if signed in, dashboard stub (`/dashboard`) redirects to login if signed out. Build passes clean.
+
+### Done (continued)
+- [x] **Task 6** — Onboarding flow: `GET /config` gate on dashboard, `POST /parse-resume` (pypdf + Claude Haiku extracts profile), `POST /onboard` (upserts users + user_configs). Web: `/onboarding` page with resume-upload path (pre-fills editable form) and manual path. Tested end-to-end — resume upload, form edit, submit, redirect to dashboard all working.
+- [x] **Task 7** — Dashboard UI tested and working: run history cards, APPLY/REVIEW/SKIP badges, Run Agent button. Shows real runs (zeros expected — no job source API keys set yet).
+- [x] **Task 8** — Agent live on Cloud Run: `https://readymadehire-agent-347263305441.us-central1.run.app`. Cloud SQL via Unix socket (Auth Proxy — no IP allowlisting). Firebase SA in Secret Manager. `web/.env.local` points at Cloud Run.
+- [x] **Task 9** — Pipeline working end-to-end: SerpAPI primary (20 results/keyword, location-aware), Serper fallback. Email via Resend from `noreply@gugul.xyz`. APPLY threshold lowered to 85.
+- [x] **Task 10 (partial)** — Enhanced onboarding: interview step (roles wanted, industries, work env, job type, min salary, years experience, open field). Keyword tag editor (add/remove/reorder). Claude uses resume + interview answers together for better keyword/profile generation. All new fields stored in `user_configs`. Deployed to Cloud Run.
 
 ### To Do (in order)
 
-**Task 2 — Per-user config**
-Replace hardcoded `PROFILE` dict and `KEYWORDS` list in `agent/app/config.py` with per-user config stored in Postgres. Add a `users` table and `user_configs` table. Pipeline loads profile + keywords by `user_id` at runtime.
+**Task 12 — Deploy web to Vercel** ← NEXT UP
+1. Create Vercel account at vercel.com (sign up with GitHub)
+2. Add New Project → import `readymadehire.saas` repo → set Root Directory to `web`
+3. Add all env vars from `web/.env.local` plus `NEXT_PUBLIC_AGENT_URL=https://readymadehire-agent-347263305441.us-central1.run.app`
+4. Deploy — Vercel auto-detects Next.js, no config needed
+5. After deploy: add the Vercel URL to Firebase Console → Authentication → Settings → Authorized domains (required for Google sign-in to work)
 
-**Task 3 — Firebase Auth on `/run-agent`** *(blocked: needs Firebase service account key from user)*
-Add Firebase Admin SDK to agent. `/run-agent` endpoint verifies Firebase ID token from `Authorization: Bearer <token>` header, extracts `user_id`, passes it to `run_pipeline()`. Replaces the current `user_id = "default"` placeholder in `server.py`.
+**Task 13 — Invite first demo users**
+Manually add Firebase accounts for curated demo users (diverse professions: teaching, construction, finance, art, etc.). Each user completes onboarding + runs agent. Review cost logs per user before scaling.
 
-**Task 4 — Per-run cost logging**
-Capture token usage from Claude API responses in `agent/app/utils/claude_client.py`. Add a `run_logs` table to Postgres. Log Haiku tokens + Sonnet tokens per run and estimate USD cost. This data feeds the dashboard (task 7).
+### Done (Tasks 11+)
+- [x] **Task 11** — Job sources wired: JSearch (RapidAPI `/search` endpoint), Adzuna, The Muse all live in `fetcher_router.py`. Keys in Cloud Run env vars. SerpAPI + Serper still primary per-keyword; new sources run as supplementary.
+- [x] **SaaS audit + universalization** — Removed all Ibrahim-specific hardcoding: filters now driven by user's `target_roles`, location filter uses user's `location_pref`, `config.py` fallback is anonymous, mock jobs are profession-neutral, email sender uses `SENDER_EMAIL` env var (gugul.xyz).
+- [x] **Bug fixes** — JSearch switched to `/search` (free tier), `init_db()` advisory lock prevents gunicorn startup deadlock, None-safe filename sanitizer, type guards on all new fetcher response shapes.
+- [x] **Pipeline verified end-to-end** — Full run completes: fetch → score → email → dashboard. Tested with education-profession user.
 
-**Task 5 — Scaffold Next.js in `web/`**
-Initialize Next.js app with TypeScript + Tailwind. Wire up Firebase Auth (sign-in / sign-out). Basic layout and routing. The user already has an existing Next.js project so they're comfortable with this stack.
+## Infrastructure (Live)
 
-**Task 6 — Onboarding flow**
-After first sign-in, new users complete onboarding: name, target roles, location preferences, search keywords. Saved to `user_configs` table. Dashboard is gated until onboarding is complete.
+- **Cloud SQL instance**: `readymadehire-db`, project `stalwart-edge-453119-m6`, region `us-central1`
+- **DB**: `readymadehire` (Postgres), IP `136.113.28.247`, user `postgres`
+- **DB tables**: `users`, `user_configs`, `jobs`, `run_logs` — all live
+- **Seeded**: `default` user in `users` + `user_configs` (Ibrahim's config, for CLI runs)
+- **Firebase project**: `readymade-hire-4276a`
+- **Firebase service account key**: `agent/firebase-service-account.json` (gitignored); stored in Secret Manager as `firebase-service-account` for Cloud Run
+- **Cloud Run service**: `readymadehire-agent`, `https://readymadehire-agent-347263305441.us-central1.run.app`
+- **Cloud Run DB**: connects via Unix socket (Cloud SQL Auth Proxy) — no IP allowlisting needed in production
+- **⚠️ Local dev only**: IP allowlist still needed for direct Postgres access from your machine. Each session: `curl -s -4 ifconfig.me` → add `/32` to Cloud SQL → Connections → Networking → Authorized networks. (Not needed if you only test against Cloud Run URL.)
 
-**Task 7 — Dashboard**
-Main dashboard: list of past runs (date, job counts, cost), job results per run (APPLY/REVIEW/SKIP with details), and a "Run Agent" button that calls `/run-agent` with the Firebase ID token in the Authorization header.
+## Onboarding Design Decisions
 
-**Task 8 — Deploy agent to Cloud Run** *(blocked: needs Cloud SQL instance from user)*
-Set up Cloud Build trigger on `agent/` changes → Docker build → Cloud Run deploy. Configure Cloud SQL connection. Set all env vars in Cloud Run (DATABASE_URL, API keys, Firebase service account).
-
-**Task 9 — Deploy web to Vercel**
-Connect `web/` to Vercel. Set env vars (Firebase config, agent Cloud Run URL). Confirm sign-in and dashboard work end-to-end in production.
-
-**Task 10 — Invite first demo users**
-Manually create Firebase accounts for curated demo users. Each user completes onboarding and runs the agent. Review cost logs per user to budget scaling. No payments day 1 — invite-only demo, user (Ibrahim) controls access.
-
-## What the User Needs to Do
-
-Before tasks 3 and 8 can be completed, the user needs to:
-
-1. **Create Cloud SQL (Postgres) instance in GCP**
-   - Go to Cloud SQL → Create instance → Postgres
-   - Name it (e.g. `readymadehire-db`)
-   - Create database `readymadehire` and a user (e.g. `agent`)
-   - Note the Instance connection name (`project:region:instance-name`)
-   - This provides the `DATABASE_URL` for agent env vars
-
-2. **Provide Firebase service account key**
-   - Go to Firebase Console → Project Settings → Service Accounts
-   - Generate a new private key (JSON)
-   - This is needed for Firebase Admin SDK in the agent (`FIREBASE_SERVICE_ACCOUNT` env var)
-
-3. **Rotate all API keys before any public-facing deploy**
-   - SerpAPI, Serper.dev, Anthropic, Gmail — rotate and update Cloud Run env vars
-   - Move secrets from Cloud Run env vars → GCP Secret Manager before going public
+- **Sign-in**: Google only (no email/password)
+- **Profile entry**: resume upload (Claude extracts profile + suggests keywords) OR manual form — user's choice
+- **Report delivery**: user enters a recipient email address during onboarding (stored in `user_configs.recipient_email`). Does not have to match their Google account email.
+- **Demo group**: diverse professions (construction, product management, teaching, AI, etc.) — pipeline is NOT AI-specific. Scorer is fully Claude-driven based on each user's profile.
 
 ## Agent Architecture & Data Flow
 
 The pipeline in `agent/app/main.py` runs in order:
 
-1. **Fetch** (`sources/fetcher_router.py`): Tries SerpAPI per keyword first; falls back to Serper.dev if SerpAPI returns empty. Both return the same internal dict shape.
-2. **Disqualify** (`scoring/filters.py → disqualify_jobs()`): Hard-blocks non-AI, research, and fellowship roles.
-3. **Filter** (`scoring/filters.py → passes_filters()`): Soft filters for role type and location. All location logic lives here — never add location filtering elsewhere.
-4. **Memory filter** (`storage/job_store.py → is_known_job()`): Skips jobs already seen by this user. Checks by `user_id + title + company`.
-5. **Score** (`scoring/scorer.py`): Batches 8 jobs at a time to Claude Haiku. Applies keyword boosts and penalties.
-6. **Decide**: Top 20 scored jobs. Score ≥ 88 AND passes `qualifies_for_apply()` → APPLY; 70–87 OR fails qualify → REVIEW; < 70 → SKIP.
-7. **Cover letters** (`composer/cover_letter.py`): Claude Sonnet generates letters for APPLY jobs. Two-pass: generate → validate → retry once if needed.
-8. **Daily report** (`utils/send_email.py`): One email per run. APPLY section (with cover letter) then REVIEW section.
-9. **Record** (`storage/job_store.py → record_job()`): All processed jobs written to Postgres with `user_id`, decision, score, and `email_sent`.
+1. **Load config** (`storage/job_store.py → get_user_config(user_id)`): Loads `UserConfig` from Postgres (or falls back to `config.py` if no `DATABASE_URL`).
+2. **Fetch** (`sources/fetcher_router.py → fetch_all_jobs(keywords)`): Tries SerpAPI per keyword first; falls back to Serper.dev if SerpAPI returns empty. Keywords come from `user_configs`.
+3. **Disqualify** (`scoring/filters.py → disqualify_jobs()`): Hard-blocks non-AI, research, and fellowship roles.
+4. **Filter** (`scoring/filters.py → passes_filters()`): Soft filters for role type and location. All location logic lives here — never add location filtering elsewhere.
+5. **Memory filter** (`storage/job_store.py → is_known_job()`): Skips jobs already seen by this user. Checks by `user_id + title + company`.
+6. **Score** (`scoring/scorer.py → score_jobs_batch(jobs, profile)`): Batches 8 jobs at a time to Claude Haiku. Scoring is purely Claude-driven based on the user's profile — no hardcoded keyword boosts.
+7. **Decide**: Top 20 scored jobs. Score ≥ 88 AND passes `qualifies_for_apply()` → APPLY; 70–87 OR fails qualify → REVIEW; < 70 → SKIP.
+8. **Cover letters** (`composer/cover_letter.py → generate_cover_letter(job, profile)`): Claude Sonnet generates letters for APPLY jobs. Two-pass: generate → validate → retry once if needed. Prompt is generalized for any profession.
+9. **Daily report** (`utils/send_email.py`): One email per run to `user_configs.recipient_email`. APPLY section (with cover letter) then REVIEW section.
+10. **Record** (`storage/job_store.py → record_job()`): All processed jobs written to Postgres with `user_id`, decision, score, and `email_sent`.
+11. **Cost log** (`storage/job_store.py → record_run_log()`): Token counts + estimated cost written to `run_logs`.
 
 ## Database Schema
 
-Current tables:
+All tables are live in Cloud SQL (`readymadehire` database).
 
 ```sql
+-- One row per registered user (Firebase UID as primary key)
+CREATE TABLE users (
+    id         TEXT PRIMARY KEY,
+    email      TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Per-user pipeline config
+CREATE TABLE user_configs (
+    user_id         TEXT PRIMARY KEY REFERENCES users(id),
+    name            TEXT NOT NULL,
+    target_roles    TEXT[],
+    location_pref   TEXT,
+    keywords        TEXT[],
+    summary         TEXT,
+    constraints     TEXT,
+    recipient_email TEXT,
+    updated_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Tracks all jobs seen and processed per user
 CREATE TABLE jobs (
     id         SERIAL PRIMARY KEY,
@@ -113,76 +134,67 @@ CREATE TABLE jobs (
     email_sent BOOLEAN DEFAULT FALSE,
     score      INTEGER DEFAULT 0
 );
-```
-
-Tables to add:
-
-```sql
--- One row per registered user
-CREATE TABLE users (
-    id         TEXT PRIMARY KEY,  -- Firebase UID
-    email      TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Per-user pipeline config (replaces hardcoded PROFILE + KEYWORDS)
-CREATE TABLE user_configs (
-    user_id         TEXT PRIMARY KEY REFERENCES users(id),
-    name            TEXT NOT NULL,
-    target_roles    TEXT[],
-    location_pref   TEXT,
-    keywords        TEXT[],
-    summary         TEXT,
-    constraints     TEXT,
-    updated_at      TIMESTAMPTZ DEFAULT NOW()
-);
 
 -- Per-run cost and summary log
 CREATE TABLE run_logs (
-    id              SERIAL PRIMARY KEY,
-    user_id         TEXT NOT NULL REFERENCES users(id),
-    run_at          TIMESTAMPTZ DEFAULT NOW(),
-    jobs_fetched    INTEGER,
-    jobs_apply      INTEGER,
-    jobs_review     INTEGER,
-    jobs_skip       INTEGER,
-    haiku_tokens    INTEGER,
-    sonnet_tokens   INTEGER,
-    estimated_cost  NUMERIC(8, 4)
+    id             SERIAL PRIMARY KEY,
+    user_id        TEXT NOT NULL REFERENCES users(id),
+    run_at         TIMESTAMPTZ DEFAULT NOW(),
+    jobs_fetched   INTEGER,
+    jobs_apply     INTEGER,
+    jobs_review    INTEGER,
+    jobs_skip      INTEGER,
+    haiku_tokens   INTEGER,
+    sonnet_tokens  INTEGER,
+    estimated_cost NUMERIC(8, 4)
 );
 ```
 
 ## Environment Variables
 
-All stored in `agent/.env` locally; Cloud Run env vars in production.
+### `agent/.env` (local) / Cloud Run env vars (production)
 
 ```
-# Existing (carried over from solo agent)
+# Anthropic
 ANTHROPIC_API_KEY=
+
+# Job sources
 SERPAPI_API_KEY=
 SERPER_API_KEY=
+
+# Email
 GMAIL_USER=
 GMAIL_APP_PASSWORD=
-RECIPIENT_EMAIL=
 
-# New (SaaS)
-DATABASE_URL=              # postgres://user:password@host:5432/dbname
-USER_ID=                   # Only used for CLI runs (--mock, --dry-run); server uses Firebase UID
-FIREBASE_SERVICE_ACCOUNT=  # Path to Firebase Admin SDK JSON key (or JSON string)
+# Database
+DATABASE_URL=postgresql://postgres:<password>@136.113.28.247:5432/readymadehire
+
+# Firebase Admin SDK
+FIREBASE_SERVICE_ACCOUNT=firebase-service-account.json  # path locally; JSON string on Cloud Run
+
+# CLI-only (used for --mock / --dry-run; server uses real Firebase UID)
+USER_ID=default
 ```
 
-## Key Configuration (Per-user, once Task 2 is done)
+### `web/.env.local` (local) / Vercel env vars (production)
 
-Currently hardcoded in `agent/app/config.py` — these will move to `user_configs` table:
-- `PROFILE` dict: name, target roles, location preference, constraints, summary
-- `KEYWORDS` list: search terms passed to SerpAPI/Serper
+```
+NEXT_PUBLIC_FIREBASE_API_KEY=
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=
+NEXT_PUBLIC_FIREBASE_APP_ID=
+NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=
+NEXT_PUBLIC_AGENT_URL=http://localhost:8080  # update to Cloud Run URL after Task 8
+```
 
 ## Claude Model Usage
 
 - **Claude Haiku** (`claude-haiku-4-5-20251001`): Job scoring — cheap, batch-optimized
 - **Claude Sonnet** (`claude-sonnet-4-20250514`): Cover letter generation — higher quality
 
-Both called through `utils/claude_client.py`. Shared `_call()` retries up to 3 times with exponential backoff. Token usage from responses should be captured here for cost logging (task 4).
+Both called through `utils/claude_client.py`. `_call()` retries up to 3 times with exponential backoff. Token usage is accumulated per run using a `threading.local()` store and written to `run_logs` at the end of each run.
 
 ## CLI Flags (agent only)
 
@@ -197,25 +209,25 @@ python -m app.main [--mock] [--dry-run]
 | `--dry-run` | SerpAPI → Serper | no | full | prints |
 | `--mock --dry-run` | mock_jobs.py | no | skipped | prints |
 
-`--mock --dry-run` combined is fully offline, zero API cost — use for local testing.
+`--mock --dry-run` combined is fully offline, zero API cost — use for local testing without `DATABASE_URL`.
 
 ## Architectural Principles (Do Not Violate)
 
 - All location logic lives in `scoring/filters.py` — never add location checks elsewhere
 - All DB logic lives in `storage/job_store.py` — never query Postgres directly from other modules
 - All Claude calls go through `utils/claude_client.py` — never call the Anthropic SDK directly elsewhere
-- Keep the pipeline engine decoupled from any single user's config — no hardcoded personal values in engine code once task 2 is done
+- Keep the pipeline engine decoupled from any single user's config — `get_user_config(user_id)` is the only entry point for user data in the pipeline
 - Greenhouse and Lever sources are commented out in `fetcher_router.py` — do not re-enable without investigating the hang issue
-- Do not modify the cover letter prompt in `composer/cover_letter.py → _build_cover_letter_prompt()` without checking with the user first
+- The cover letter prompt in `_build_cover_letter_prompt()` is generalized for any profession — do not re-introduce Ibrahim-specific framing or Readymade.AI references
 
 ## Running Locally
 
 ```bash
 cd agent
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv --copies && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Fully offline test (no API costs, no DB needed)
+# Fully offline test (no API costs, no DB needed — uses config.py fallback)
 python -m app.main --mock --dry-run
 
 # Full pipeline (requires .env with all keys + DATABASE_URL)
@@ -225,8 +237,16 @@ python -m app.main
 python app/server.py
 ```
 
+```bash
+cd web
+npm install
+npm run dev   # runs at localhost:3000
+```
+
 ## Security Notes
 
-- `/run-agent` currently has a placeholder `user_id = "default"` — Firebase token verification must be implemented (task 3) before any real users are onboarded
-- Never commit `.env` or Firebase service account JSON keys
-- Before any public-facing deploy: rotate all API keys, implement `/run-agent` auth, move secrets to GCP Secret Manager
+- Firebase token verification is live on `/run-agent` — real users are safe to onboard after Task 6
+- Never commit `.env`, `firebase-service-account.json`, or `web/.env.local`
+- Before any public-facing deploy: rotate all API keys, move secrets to GCP Secret Manager
+- Cloud SQL password (`r00tacc3ss`) must be rotated before going public
+- Firebase Google sign-in must be enabled in Firebase Console → Authentication → Sign-in method → Google → Enable (required before web auth works)

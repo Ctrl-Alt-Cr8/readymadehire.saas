@@ -17,20 +17,19 @@ from app.scoring.filters import disqualify_jobs, passes_filters, qualifies_for_a
 from app.scoring.scorer import score_job, score_jobs_batch
 from app.sources.fetcher_router import fetch_all_jobs
 from app.sources.mock_jobs import get_jobs as get_mock_jobs
-from app.storage.job_store import init_db, is_known_job, record_job, update_last_seen
+from app.storage.job_store import init_db, is_known_job, record_job, update_last_seen, get_user_config, record_run_log
+from app.utils.claude_client import reset_token_counts, get_token_counts
 from app.utils.send_email import send_email
 
 
 console = Console()
 
-RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL", "")
-
-APPLY_THRESHOLD = 88
+APPLY_THRESHOLD = 85
 REVIEW_THRESHOLD = 70
 
 
 def _sanitize_filename_part(value: str) -> str:
-    sanitized = re.sub(r"[^a-z0-9\s_-]", "", value.lower())
+    sanitized = re.sub(r"[^a-z0-9\s_-]", "", (value or "unknown").lower())
     sanitized = re.sub(r"\s+", "_", sanitized).strip("_")
     return sanitized or "unknown"
 
@@ -54,6 +53,12 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
     if not user_id:
         user_id = os.getenv("USER_ID", "default")
 
+    config = get_user_config(user_id)
+    profile = config.as_profile()
+    recipient_email = config.recipient_email or os.getenv("RECIPIENT_EMAIL", "")
+
+    reset_token_counts()
+
     output_dir = "outputs"
     cover_letters_dir = os.path.join(output_dir, "cover_letters")
     os.makedirs(cover_letters_dir, exist_ok=True)
@@ -64,13 +69,15 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
         jobs = get_mock_jobs()
         print(f"[MOCK] Loaded {len(jobs)} mock jobs")
     else:
-        jobs = fetch_all_jobs()
+        jobs = fetch_all_jobs(config.keywords, location_pref=config.location_pref)
         print(f"Fetched {len(jobs)} jobs")
 
-    jobs = disqualify_jobs(jobs)
+    jobs_fetched = len(jobs)
+
+    jobs = disqualify_jobs(jobs, config)
     print(f"After disqualification: {len(jobs)} jobs")
 
-    jobs = [job for job in jobs if passes_filters(job)]
+    jobs = [job for job in jobs if passes_filters(job, config)]
     print(f"After filtering: {len(jobs)} jobs")
 
     new_jobs = []
@@ -113,14 +120,14 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
         print(f"[DRY RUN] Using mock scores for {len(jobs)} jobs (no Claude call)")
     else:
         try:
-            scores = score_jobs_batch(jobs)
+            scores = score_jobs_batch(jobs, profile)
             for job, score in zip(jobs, scores):
                 scored_jobs.append({"job": job, "score": score})
             print(f"✅ Batch scored {len(jobs)} jobs in 1 Claude call")
         except Exception as e:
             print(f"⚠️ Batch scoring failed, falling back to individual: {e}")
             for job in jobs:
-                score = score_job(job)
+                score = score_job(job, profile)
                 scored_jobs.append({"job": job, "score": score})
 
     scored_jobs = sorted(scored_jobs, key=lambda x: x["score"]["score"], reverse=True)
@@ -200,7 +207,7 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
                 cover_letter = "[mock cover letter — dry-run, no Claude call]"
                 print(f"[DRY RUN] Skipping cover letter generation for {job.get('company', '')} | {job.get('title', '')}")
             else:
-                cl_result = generate_cover_letter(job)
+                cl_result = generate_cover_letter(job, profile)
                 if cl_result["valid"]:
                     cover_letter = cl_result["text"]
                     cover_letter_path = os.path.join(
@@ -259,7 +266,7 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
             lines.append(f"--- APPLY ({len(apply_sorted)} job(s)) ---")
             lines.append("")
             for i, aj in enumerate(apply_sorted, 1):
-                lines.append(f"{i}. {aj['company']} — {aj['role']}")
+                lines.append(f"{i}. {aj['company'] or '—'} — {aj['role']}")
                 lines.append(f"   Location : {aj['location']}")
                 lines.append(f"   Salary   : {aj['salary']}")
                 lines.append(f"   Score    : {aj['score']}/100")
@@ -278,7 +285,7 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
             lines.append(f"--- REVIEW ({len(review_sorted)} job(s)) ---")
             lines.append("")
             for i, rj in enumerate(review_sorted, 1):
-                lines.append(f"{i}. {rj['company']} — {rj['role']}")
+                lines.append(f"{i}. {rj['company'] or '—'} — {rj['role']}")
                 lines.append(f"   Location : {rj['location']}")
                 lines.append(f"   Salary   : {rj['salary']}")
                 lines.append(f"   Score    : {rj['score']}/100")
@@ -292,13 +299,13 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
     report_sent = False
     if dry_run or mock:
         prefix = "[DRY RUN]" if dry_run else "[MOCK]"
-        print(f"\n{prefix} Would send to: {RECIPIENT_EMAIL}")
+        print(f"\n{prefix} Would send to: {recipient_email}")
         print(f"{prefix} Subject: {report_subject}")
         print(f"{prefix} Body:\n{report_body}")
     else:
         try:
-            print(f"📧 SENDING DAILY REPORT TO: {RECIPIENT_EMAIL}")
-            send_email(to_email=RECIPIENT_EMAIL, subject=report_subject, body=report_body)
+            print(f"📧 SENDING DAILY REPORT TO: {recipient_email}")
+            send_email(to_email=recipient_email, subject=report_subject, body=report_body)
             report_sent = True
             print("✅ DAILY REPORT SENT")
         except Exception as error:
@@ -309,6 +316,20 @@ def run(mock: bool = False, dry_run: bool = False, user_id: str = "") -> None:
             record_job(entry["_job"], "APPLY", entry["score"], email_sent=report_sent, user_id=user_id)
         for entry in review_jobs:
             record_job(entry["_job"], "REVIEW", entry["score"], email_sent=report_sent, user_id=user_id)
+
+        tokens = get_token_counts()
+        record_run_log(
+            user_id=user_id,
+            jobs_fetched=jobs_fetched,
+            jobs_apply=apply_count,
+            jobs_review=review_count,
+            jobs_skip=skip_count,
+            haiku_tokens=tokens["haiku_tokens"],
+            sonnet_tokens=tokens["sonnet_tokens"],
+            estimated_cost=tokens["estimated_cost"],
+        )
+        print(f"💰 Run cost: ${tokens['estimated_cost']:.4f} "
+              f"(Haiku: {tokens['haiku_tokens']} tokens, Sonnet: {tokens['sonnet_tokens']} tokens)")
 
     results = sorted(results, key=lambda x: x["score"], reverse=True)
     top_results = results[:20]

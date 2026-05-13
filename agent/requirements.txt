@@ -3,5 +3,9 @@ python-dotenv
 requests
 rich
 flask
+flask-cors
 google-search-results
 psycopg2-binary
+firebase-admin
+pypdf
+resend

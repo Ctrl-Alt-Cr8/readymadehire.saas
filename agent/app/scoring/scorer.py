@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 
-from app.config import PROFILE
 from app.utils.claude_client import call_claude_haiku
 
 
@@ -15,22 +14,8 @@ DEFAULT_SCORE = {
     "gaps": "Could not evaluate gaps.",
 }
 
-PRIORITY_KEYWORDS = [
-    "llm", "large language model", "prompt", "prompt engineering",
-    "agent", "ai agent", "automation", "workflow", "orchestration",
-    "api integration", "integrations", "openai", "anthropic", "claude",
-    "generative ai", "gpt", "ai systems", "ai applications", "prototype",
-    "prototyping", "rapid iteration", "developer tools",
-]
-
-PENALTY_KEYWORDS = [
-    "phd required", "statistics", "model training", "computer vision",
-    "research publication", "research agenda", "theoretical",
-]
-
 
 def _extract_json_payload(raw_text: str) -> str:
-    """Extract a JSON object or array from raw model output."""
     text = raw_text.strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -39,28 +24,13 @@ def _extract_json_payload(raw_text: str) -> str:
     return text
 
 
-def _apply_boosts(parsed: dict, combined_text: str) -> dict:
-    """Apply keyword boost and penalty to a parsed score dict."""
-    score = int(float(parsed["score"]))
-    boost = sum(3 for k in PRIORITY_KEYWORDS if k in combined_text)
-    score += min(boost, 18)
-    penalty = sum(8 for k in PENALTY_KEYWORDS if k in combined_text)
-    score -= min(penalty, 24)
-    parsed["score"] = max(0, min(100, score))
-    return parsed
-
-
-def score_job(job: dict) -> dict:
-    """Score a single job against the configured profile using Claude Haiku."""
-    title = (job.get("title") or "").lower()
-    description = (job.get("description") or "").lower()
-    combined_text = f"{title} {description}"
-
+def score_job(job: dict, profile: dict) -> dict:
+    """Score a single job against the user's profile using Claude Haiku."""
     prompt = f"""
 You are evaluating job relevance for a candidate profile.
 
 Candidate profile:
-{json.dumps(PROFILE, indent=2)}
+{json.dumps(profile, indent=2)}
 
 Job listing:
 {json.dumps(job, indent=2)}
@@ -90,13 +60,14 @@ Rules:
         if not required_keys.issubset(parsed):
             return DEFAULT_SCORE
 
-        return _apply_boosts(parsed, combined_text)
+        parsed["score"] = max(0, min(100, int(float(parsed["score"]))))
+        return parsed
     except Exception as e:
         print("❌ CLAUDE SCORING ERROR:", str(e))
         return DEFAULT_SCORE
 
 
-def score_jobs_batch(jobs: list[dict]) -> list[dict]:
+def score_jobs_batch(jobs: list[dict], profile: dict) -> list[dict]:
     """
     Score all jobs using chunked Claude Haiku calls.
     Sends jobs in chunks of 8 instead of one call per job.
@@ -121,7 +92,7 @@ def score_jobs_batch(jobs: list[dict]) -> list[dict]:
 You are evaluating job relevance for a candidate profile.
 
 Candidate profile:
-{json.dumps(PROFILE, indent=2)}
+{json.dumps(profile, indent=2)}
 
 Below are {len(chunk)} job listings. Score each one and return a JSON array with exactly {len(chunk)} objects in the same order as the input.
 
@@ -148,20 +119,20 @@ Return ONLY a valid JSON array. No markdown, no code fences, no preamble, no ext
                 raise ValueError(f"Expected {len(chunk)} results, got {len(parsed_list) if isinstance(parsed_list, list) else 'non-list'}")
 
             required_keys = {"score", "why_fit", "best_angle", "gaps"}
-            for i, (job, parsed) in enumerate(zip(chunk, parsed_list)):
+            for i, parsed in enumerate(parsed_list):
                 if not required_keys.issubset(parsed):
                     print(f"⚠️ Chunk {chunk_index} job {i} missing keys, using default score")
                     all_results.append(DEFAULT_SCORE)
                     continue
-                combined_text = f"{(job.get('title') or '').lower()} {(job.get('description') or '').lower()}"
-                all_results.append(_apply_boosts(parsed, combined_text))
+                parsed["score"] = max(0, min(100, int(float(parsed["score"]))))
+                all_results.append(parsed)
 
             print(f"✅ Chunk {chunk_index + 1}/{len(chunks)} scored ({len(chunk)} jobs)")
 
         except Exception as e:
             print(f"⚠️ Chunk {chunk_index + 1} failed ({e}), falling back to individual scoring for this chunk")
             for job in chunk:
-                all_results.append(score_job(job))
+                all_results.append(score_job(job, profile))
 
     print(f"✅ Batch complete: scored {len(all_results)} jobs in {len(chunks)} Claude calls")
     return all_results

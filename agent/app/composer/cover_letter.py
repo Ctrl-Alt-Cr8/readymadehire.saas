@@ -7,7 +7,6 @@ import re
 
 from rich.console import Console
 
-from app.config import PROFILE
 from app.utils.claude_client import call_claude_sonnet
 
 
@@ -21,20 +20,21 @@ RETRY_PREFIX = (
 )
 
 
-def _build_cover_letter_prompt(job: dict) -> str:
+def _build_cover_letter_prompt(job: dict, profile: dict) -> str:
     """Build the base prompt for cover letter generation."""
     return f"""
-Write a tailored cover letter for this job using a high-signal, builder-focused voice.
+Write a tailored cover letter for this job using a high-signal, professional voice.
 
 Candidate profile:
-{json.dumps(PROFILE, indent=2)}
+{json.dumps(profile, indent=2)}
 
 Job:
 {json.dumps(job, indent=2)}
 
 Your objective:
-- Position the candidate as an AI systems builder, not a traditional applicant.
-- Write like a peer speaking to builders.
+- Position the candidate based on their background, target roles, and professional expertise.
+- Write with confidence and specificity, demonstrating their experience.
+- Write like a peer speaking to decision-makers, not like a junior applicant.
 
 Tone and voice requirements:
 - Confident, direct, peer-to-peer.
@@ -43,22 +43,22 @@ Tone and voice requirements:
 - Prefer grounded phrasing patterns such as:
   - "I've been building..."
   - "My work focuses on..."
-  - "I build..."
+  - "I specialize in..."
 
 Mandatory structure (exactly 5 paragraphs):
 1) Opening:
-    - Pattern-interrupt style opening.
-    - Example style: "Most AI systems stop at generation. I focus on systems that act and actually ship."
+    - Strong, specific opening that immediately establishes the candidate's professional focus.
+    - Avoid generic openers. Start with what makes them distinct.
 2) Relevance:
     - Reference something specific about this role or company.
-    - Show awareness of what they are building.
+    - Show awareness of what they are building or trying to accomplish.
     - Avoid generic statements.
 3) Proof:
-    - Highlight concrete system-building experience.
-    - Must include evidence across LLM orchestration, AI agents, production deployment, and reliability / edge cases.
+    - Highlight concrete experience and achievements relevant to the role.
+    - Be specific — show impact, not just responsibilities.
 4) Positioning:
-    - Show alignment with what the company is trying to build.
-    - Speak as a peer, not a junior applicant.
+    - Show alignment with what the company is trying to accomplish.
+    - Speak as a peer with relevant expertise, not as a junior applicant.
     - No begging language and no "fit" language.
 5) Close:
     - Short, confident close.
@@ -76,12 +76,7 @@ Strict prohibitions:
   - "hardworking"
   - "team player"
   - "This role works for me"
-- Do NOT explain basic AI concepts. Assume the reader is technical.
-
-Readymade.AI rule:
-- Mention Readymade.AI only if it is clearly relevant to the role context.
-- Use it as proof of system-building capability when included.
-- Do not force it into every letter.
+- Do NOT explain basic concepts in the field. Assume the reader is knowledgeable.
 
 Style constraints:
 - Avoid excessive em dashes.
@@ -97,20 +92,20 @@ Length and output:
 - End with this exact sign-off block:
 
 Best,
-{PROFILE['name']}
+{profile['name']}
 
 - Output plain text only.
 - Return only the final cover letter text.
-- Output must read like a real human wrote it, demonstrate capability through specificity, and position the candidate as a builder, not an applicant.
+- Output must read like a real human wrote it, demonstrate capability through specificity, and position the candidate as a professional, not an applicant.
 """.strip()
 
 
-def validate_cover_letter(text: str) -> dict:
+def validate_cover_letter(text: str, profile: dict) -> dict:
     """Validate key formatting and style constraints for generated cover letters."""
     issues: list[str] = []
     normalized_text = text.strip()
 
-    required_ending = f"Best,\n{PROFILE['name']}"
+    required_ending = f"Best,\n{profile['name']}"
     if not normalized_text.endswith(required_ending):
         issues.append("Missing required ending format")
 
@@ -158,17 +153,17 @@ def validate_cover_letter(text: str) -> dict:
     return {"valid": len(issues) == 0, "issues": issues}
 
 
-def generate_cover_letter(job: dict) -> dict:
+def generate_cover_letter(job: dict, profile: dict) -> dict:
     """Generate a tailored cover letter. Returns {"text": str, "valid": bool, "issues": list[str]}."""
-    base_prompt = _build_cover_letter_prompt(job)
+    base_prompt = _build_cover_letter_prompt(job, profile)
 
     first_attempt = call_claude_sonnet(base_prompt).strip()
-    if validate_cover_letter(first_attempt).get("valid", False):
+    if validate_cover_letter(first_attempt, profile).get("valid", False):
         return {"text": first_attempt, "valid": True, "issues": []}
 
     retry_prompt = f"{RETRY_PREFIX}\n\n{base_prompt}"
     second_attempt = call_claude_sonnet(retry_prompt).strip()
-    second_validation = validate_cover_letter(second_attempt)
+    second_validation = validate_cover_letter(second_attempt, profile)
 
     return {
         "text": second_attempt,
