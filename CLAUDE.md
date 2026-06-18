@@ -46,17 +46,34 @@ web/      # Next.js frontend — Firebase Auth, onboarding, dashboard
 
 ### To Do (in order)
 
-**Task 12 — Deploy web to Vercel** ← NEXT UP
-1. Create Vercel account at vercel.com (sign up with GitHub)
-2. Add New Project → import `readymadehire.saas` repo → set Root Directory to `web`
-3. Add all env vars from `web/.env.local` plus `NEXT_PUBLIC_AGENT_URL=https://readymadehire-agent-347263305441.us-central1.run.app`
-4. Deploy — Vercel auto-detects Next.js, no config needed
-5. After deploy: add the Vercel URL to Firebase Console → Authentication → Settings → Authorized domains (required for Google sign-in to work)
+**Task 13 — Invite first demo users** ← IN PROGRESS
+First batch: product management + construction users already invited. Instagram story sent — expecting 5-7 total demo users. Each user completes onboarding + runs agent. Review cost logs per user before scaling.
 
-**Task 13 — Invite first demo users**
-Manually add Firebase accounts for curated demo users (diverse professions: teaching, construction, finance, art, etc.). Each user completes onboarding + runs agent. Review cost logs per user before scaling.
+**Task 14 — Run scheduling**
+Add ability for users to schedule automatic daily runs instead of manually hitting Run Agent. Agent-side cron or Cloud Scheduler trigger per user.
 
-### Done (Tasks 11+)
+**Task 15 — Voice-matched cover letters**
+Upload writing samples or existing cover letters so Claude can match the user's tone and style.
+
+### Future Projects (Next Session Priority)
+
+**Grant & Funding Finder (spin-off)**
+Clone this repo and adapt the pipeline for artists and community organizers searching for grants/funding instead of jobs. ~70% of the codebase carries over unchanged.
+
+What maps directly: all infrastructure (Postgres, Firebase, Cloud Run, Vercel), pipeline architecture (fetch → score → filter → email digest), per-user config, cost logging, onboarding flow, web frontend structure.
+
+What needs building:
+- **Fetchers** — Grants.gov free REST API (federal), SerpAPI grant-specific queries, state/local arts council scraping
+- **Scoring prompt** — rewrite for grant fit: mission alignment, eligibility, award size, deadline proximity
+- **User profile** — discipline, org type (individual/nonprofit/collective), past grants, project descriptions, budget range
+- **Cover letter → LOI generator** — same two-pass Claude pattern, different prompt
+- **DB schema** — `grants` table with `deadline`, `award_amount`, `eligibility`, `funder` fields
+- **Filters** — eligibility-based (501c3 required? individual artists only? geographic restrictions?)
+
+Estimated effort: 2–3 weeks. Hardest part is grant data sourcing — federal well-covered, local/private foundations are fragmented.
+
+### Done (Tasks 11–12)
+- [x] **Task 12** — Web deployed to Vercel. Repo made public, all env vars set, Firebase authorized domain added. Google sign-in working end-to-end.
 - [x] **Task 11** — Job sources wired: JSearch (RapidAPI `/search` endpoint), Adzuna, The Muse all live in `fetcher_router.py`. Keys in Cloud Run env vars. SerpAPI + Serper still primary per-keyword; new sources run as supplementary.
 - [x] **SaaS audit + universalization** — Removed all Ibrahim-specific hardcoding: filters now driven by user's `target_roles`, location filter uses user's `location_pref`, `config.py` fallback is anonymous, mock jobs are profession-neutral, email sender uses `SENDER_EMAIL` env var (gugul.xyz).
 - [x] **Bug fixes** — JSearch switched to `/search` (free tier), `init_db()` advisory lock prevents gunicorn startup deadlock, None-safe filename sanitizer, type guards on all new fetcher response shapes.
@@ -192,7 +209,7 @@ NEXT_PUBLIC_AGENT_URL=http://localhost:8080  # update to Cloud Run URL after Tas
 ## Claude Model Usage
 
 - **Claude Haiku** (`claude-haiku-4-5-20251001`): Job scoring — cheap, batch-optimized
-- **Claude Sonnet** (`claude-sonnet-4-20250514`): Cover letter generation — higher quality
+- **Claude Sonnet** (`claude-sonnet-4-6`): Cover letter generation — higher quality
 
 Both called through `utils/claude_client.py`. `_call()` retries up to 3 times with exponential backoff. Token usage is accumulated per run using a `threading.local()` store and written to `run_logs` at the end of each run.
 
