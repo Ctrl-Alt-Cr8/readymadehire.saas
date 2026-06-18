@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-20250514"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 # Pricing per million tokens
 _HAIKU_COST = {"input": 0.80, "output": 4.00}
