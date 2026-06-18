@@ -211,7 +211,9 @@ NEXT_PUBLIC_AGENT_URL=http://localhost:8080  # update to Cloud Run URL after Tas
 - **Claude Haiku** (`claude-haiku-4-5-20251001`): Job scoring — cheap, batch-optimized
 - **Claude Sonnet** (`claude-sonnet-4-6`): Cover letter generation — higher quality
 
-Both called through `utils/claude_client.py`. `_call()` retries up to 3 times with exponential backoff. Token usage is accumulated per run using a `threading.local()` store and written to `run_logs` at the end of each run.
+Both called through `utils/claude_client.py`.
+
+**June 18, 2026:** `claude-sonnet-4-20250514` retired by Anthropic June 15. Updated `SONNET_MODEL` in `agent/app/utils/claude_client.py` to `claude-sonnet-4-6`. Redeployed via `gcloud run deploy readymadehire-agent --source . --region us-central1` (revision `00018-frt`). `_call()` retries up to 3 times with exponential backoff. Token usage is accumulated per run using a `threading.local()` store and written to `run_logs` at the end of each run.
 
 ## CLI Flags (agent only)
 
